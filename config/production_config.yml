@@ -1,0 +1,29 @@
+server:
+  requestLog:
+      appenders:
+        - type: file
+          currentLogFilename: /tmp/superapi/access.log
+          threshold: ALL
+          archive: true
+          timeZone: UTC
+          archivedLogFilenamePattern: /tmp/superapi/access.%d.log.gz
+          archivedFileCount: 14
+  applicationConnectors:
+    - type: http
+      port: 80
+  adminConnectors:
+    - type: http
+      port: 8081
+
+#Only log system messages to this
+logging:
+  level: INFO
+  appenders:
+    - type: file
+      currentLogFilename: /tmp/superapi/server.log
+      threshold: INFO
+      archive: true
+      archivedLogFilenamePattern: /tmp/superapi/server-%d.log
+      archivedFileCount: 5
+      timeZone: UTC
+      logFormat: "%d{HH:mm:ss.SSS} [%thread] %-5level %logger{5} - %msg%n"

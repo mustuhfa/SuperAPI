@@ -1,0 +1,161 @@
+import javax.xml.bind.DatatypeConverter
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
+
+apply plugin: "java"
+apply plugin: "application"
+apply plugin: 'com.github.johnrengelman.shadow'
+apply plugin: 'org.hidetake.ssh'
+
+buildscript {
+    repositories {
+        jcenter()
+    }
+    dependencies {
+        classpath 'com.github.jengelman.gradle.plugins:shadow:1.2.3'
+        classpath 'org.hidetake:gradle-ssh-plugin:2.7.0'
+
+    }
+}
+
+repositories {
+    jcenter()
+}
+
+ext {
+
+    VERSION = "1.0"
+    PROD_IP = "FILL THIS IN"
+    PROD_USER = "root"
+
+    //Dont Change
+    PROD_KEY_PATH = project.hasProperty("identity") ? project.property("identity") : ""
+    APP_IDENTIFIER = project.hasProperty("app_id") ? project.property("app_id") : ""
+    APP_NAME = "SuperAPI"
+    APP_BIN_NAME = "$APP_NAME-$VERSION-all.jar"
+    CONFIG_NAME = "production_config.yml"
+    REMOTE_DEPLOY_FOLDER_ROOT = "/opt/superapi"
+    REMOTE_APP_DEPLOY_PATH = "$REMOTE_DEPLOY_FOLDER_ROOT/$APP_BIN_NAME"
+    REMOTE_CONFIG_DEPLOY_PATH = "$REMOTE_DEPLOY_FOLDER_ROOT/$CONFIG_NAME"
+    LOCAL_APP_BIN_PATH = "$project.buildDir/libs/$APP_BIN_NAME"
+    LOCAL_PROD_CONFIG_PATH = "$project.rootDir/config/$CONFIG_NAME"
+    MAIN_CLASS = "Main"
+
+    properties.each { prop ->
+        println prop
+    }
+
+}
+
+sourceCompatibility = 1.8
+targetCompatibility = 1.8
+
+
+sourceSets {
+    main {
+        java {
+            srcDirs = ['src/java']
+        }
+        resources {
+            srcDirs = ['src/resources']
+        }
+    }
+
+    test {
+        java {
+            srcDirs = ['src/test']
+        }
+    }
+}
+
+
+dependencies {
+    compile "io.dropwizard:dropwizard-core:1.0.2"
+    testCompile "junit:junit:4.12"
+    testCompile "com.google.truth:truth:0.30"
+}
+
+shadowJar {
+    baseName = APP_NAME
+    version = VERSION
+    //Dont copy configuration into the application
+    exclude 'config/*'
+    mergeServiceFiles()
+}
+
+
+
+run {
+    mainClassName = MAIN_CLASS
+    args 'server', project.rootDir.absolutePath + '/config/local_config.yml'
+}
+
+runShadow {
+    mainClassName = MAIN_CLASS
+    args 'server', project.rootDir.absolutePath + '/config/local_config.yml'
+}
+
+remotes {
+    digitalocean {
+        host = PROD_IP
+        user = PROD_USER
+        if (!PROD_KEY_PATH.isEmpty()) {
+            identity = file(PROD_KEY_PATH)
+        }
+    }
+
+}
+
+
+task deployAPI << {
+
+    ssh.settings {
+        knownHosts = allowAnyHosts
+    }
+
+    ssh.run {
+
+        if (remotes.digitalocean.identity == null) {
+            throw new GradleException("Need to provide ssh identity to use")
+        }
+
+        if (APP_IDENTIFIER.isEmpty()) {
+            throw new GradleException("Need to provide app identifier")
+        }
+
+        session(remotes.digitalocean) {
+            println "Killing existing process if it exists"
+            def killAPI = "tmux kill-session -t $APP_IDENTIFIER"
+            println killAPI
+            execute(killAPI, ignoreError: true)
+
+            println "Creating deployment directory : $REMOTE_DEPLOY_FOLDER_ROOT"
+            execute("mkdir -p $REMOTE_DEPLOY_FOLDER_ROOT")
+
+            println "Uploading prod build and config"
+            put from: LOCAL_APP_BIN_PATH, into: REMOTE_APP_DEPLOY_PATH
+            put from: LOCAL_PROD_CONFIG_PATH, into: REMOTE_CONFIG_DEPLOY_PATH
+
+            println "Starting new version"
+
+            def startAPI = "tmux new -A -s $APP_IDENTIFIER -d " +
+                    "java " +
+                    "-Dnewrelic.config.app_name='$APP_NAME-all;$APP_NAME-$APP_IDENTIFIER' " +
+                    "-Dnewrelic.environment=production  " +
+                    "-javaagent:/opt/newrelic/newrelic.jar " +
+                    "-jar $REMOTE_APP_DEPLOY_PATH server $REMOTE_CONFIG_DEPLOY_PATH"
+            println startAPI
+            execute(startAPI)
+
+            //Check for healthcheck in a loop
+            sleep(3000)
+            println "Starting healthchecks"
+            execute("ps -fC tmux | grep $APP_NAME-$APP_IDENTIFIER")
+            println "Found process"
+            execute("wget -O - --retry-connrefused --tries=10 http://127.0.0.1:8081/ping > /dev/null")
+            println "Pong received"
+        }
+
+    }
+}
+
