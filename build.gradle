@@ -1,0 +1,82 @@
+apply plugin: "java"
+apply plugin: "application"
+apply plugin: 'com.github.johnrengelman.shadow'
+
+buildscript {
+    repositories {
+        jcenter()
+    }
+    dependencies {
+        classpath 'com.github.jengelman.gradle.plugins:shadow:1.2.3'
+        classpath 'org.hidetake:gradle-ssh-plugin:2.7.0'
+    }
+}
+
+repositories {
+    jcenter()
+}
+
+ext {
+
+    VERSION = "1.0"
+    APP_NAME = "SuperAPI"
+    APP_BIN_NAME = "$APP_NAME-$VERSION-all.jar"
+    CONFIG_DIR = "$project.rootDir/config"
+    LOCAL_CONFIG_FILE = "$CONFIG_DIR/local_config.yml"
+    LOCAL_APP_BIN_PATH = "$project.buildDir/libs/$APP_BIN_NAME"
+    MAIN_CLASS = "Main"
+
+    properties.each { prop ->
+        println prop
+    }
+
+}
+
+sourceCompatibility = 1.8
+targetCompatibility = 1.8
+
+
+sourceSets {
+    main {
+        java {
+            srcDirs = ['src/java']
+        }
+        resources {
+            srcDirs = ['src/resources']
+        }
+    }
+
+    test {
+        java {
+            srcDirs = ['src/test']
+        }
+    }
+}
+
+
+dependencies {
+    compile "io.dropwizard:dropwizard-core:1.0.2"
+    testCompile "junit:junit:4.12"
+    testCompile "com.google.truth:truth:0.30"
+}
+
+
+shadowJar {
+    baseName = APP_NAME
+    version = VERSION
+    //Dont copy configuration into the application
+    mergeServiceFiles()
+}
+
+
+
+run {
+    mainClassName = MAIN_CLASS
+    args 'server', LOCAL_CONFIG_FILE
+}
+
+runShadow {
+    mainClassName = MAIN_CLASS
+    args 'server', LOCAL_CONFIG_FILE
+}
+
